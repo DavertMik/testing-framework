@@ -16,10 +16,12 @@ namespace TYPO3\TestingFramework\Core;
 
 use Doctrine\DBAL\DBALException;
 use Doctrine\DBAL\DriverManager;
+use Doctrine\DBAL\Platforms\MySqlPlatform;
 use Doctrine\DBAL\Platforms\PostgreSqlPlatform;
 use Doctrine\DBAL\Platforms\SQLServerPlatform;
 use TYPO3\CMS\Core\Core\Bootstrap;
 use TYPO3\CMS\Core\Core\ClassLoadingInformation;
+use TYPO3\CMS\Core\Core\Environment;
 use TYPO3\CMS\Core\Core\SystemEnvironmentBuilder;
 use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\Database\ConnectionPool;
@@ -538,6 +540,10 @@ class Testbase
     {
         // Drop database if exists. Directly using the Doctrine DriverManager to
         // work around connection caching in ConnectionPool
+        $connectionPool = GeneralUtility::makeInstance(ConnectionPool::class);
+        $connection = $connectionPool->getConnectionByName(ConnectionPool::DEFAULT_CONNECTION_NAME);
+        $connection->close();
+        $connectionPool->resetConnections();
         $connectionParameters = $GLOBALS['TYPO3_CONF_VARS']['DB']['Connections']['Default'];
         unset($connectionParameters['dbname']);
         $schemaManager = DriverManager::getConnection($connectionParameters)->getSchemaManager();
@@ -577,18 +583,19 @@ class Testbase
         $_SERVER['PWD'] = $instancePath;
         $_SERVER['argv'][0] = 'index.php';
 
+        // Reset state from a possible previous run
+        GeneralUtility::purgeInstances();
+        GeneralUtility::resetApplicationContext();
+
         $classLoader = require rtrim(realpath($instancePath . '/typo3'), '\\/') . '/../vendor/autoload.php';
         SystemEnvironmentBuilder::run(0, SystemEnvironmentBuilder::REQUESTTYPE_BE | SystemEnvironmentBuilder::REQUESTTYPE_CLI);
-        $applicationContext = Bootstrap::createApplicationContext();
-        SystemEnvironmentBuilder::initializeEnvironment($applicationContext);
-        GeneralUtility::presetApplicationContext($applicationContext);
-        Bootstrap::initializeClassLoader($classLoader);
-
-        Bootstrap::baseSetup();
-        Bootstrap::loadConfigurationAndInitialize(true);
+        // Casual bootstrap init, but with failsafe true to suppress some initializations
+        Bootstrap::init($classLoader, true);
+        // Make sure output is not buffered, so command-line output can take place
+        ob_end_clean();
 
         $this->dumpClassLoadingInformation();
-        Bootstrap::loadTypo3LoadedExtAndExtLocalconf(true);
+        Bootstrap::loadTypo3LoadedExtAndExtLocalconf(false);
         Bootstrap::setFinalCachingFrameworkCacheConfiguration();
         Bootstrap::unsetReservedGlobalVariables();
     }
@@ -615,10 +622,12 @@ class Testbase
      */
     public function initializeTestDatabaseAndTruncateTables()
     {
-        $connection = GeneralUtility::makeInstance(ConnectionPool::class)
-            ->getConnectionByName(ConnectionPool::DEFAULT_CONNECTION_NAME);
+        $connectionPool = GeneralUtility::makeInstance(ConnectionPool::class);
+        $connection = $connectionPool->getConnectionByName(ConnectionPool::DEFAULT_CONNECTION_NAME);
+        $connection->close();
+        $connectionPool->resetConnections();
+        $connection = $connectionPool->getConnectionByName(ConnectionPool::DEFAULT_CONNECTION_NAME);
         $schemaManager = $connection->getSchemaManager();
-
         foreach ($schemaManager->listTables() as $table) {
             $connection->truncate($table->getName());
             self::resetTableSequences($connection, $table->getName());
@@ -633,8 +642,8 @@ class Testbase
      */
     public function loadExtensionTables()
     {
-        Bootstrap::loadBaseTca();
-        Bootstrap::loadExtTables();
+        Bootstrap::loadBaseTca(false);
+        Bootstrap::loadExtTables(false);
     }
 
     /**
