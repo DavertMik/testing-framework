@@ -224,6 +224,7 @@ abstract class FunctionalTestCase extends BaseTestCase
         if ($testbase->recentTestInstanceExists($this->instancePath)) {
             // Reusing an existing instance. This typically happens for the second, third, ... test
             // in a test case, so environment is set up only once per test case.
+            GeneralUtility::purgeInstances();
             $testbase->setUpBasicTypo3Bootstrap($this->instancePath);
             $testbase->initializeTestDatabaseAndTruncateTables();
             Bootstrap::initializeBackendRouter();
